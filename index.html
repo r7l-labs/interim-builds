@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interim Builds</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            margin-bottom: 2rem;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 0.5rem;
+            font-size: 2.5rem;
+        }
+        
+        .subtitle {
+            color: #666;
+            font-size: 1.1rem;
+        }
+        
+        .directories {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        h2 {
+            color: #333;
+            margin-bottom: 1.5rem;
+            font-size: 1.8rem;
+        }
+        
+        .directory-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 1rem;
+        }
+        
+        .directory-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 1.5rem;
+            border-radius: 8px;
+            text-decoration: none;
+            color: white;
+            transition: transform 0.3s, box-shadow 0.3s;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .directory-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        }
+        
+        .directory-name {
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+        
+        .directory-files {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: #999;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📦 Interim Builds</h1>
+            <p class="subtitle">Browse builds by build number</p>
+        </div>
+        
+        <div class="directories">
+            <h2>📁 Available Builds</h2>
+            <div class="directory-grid" id="buildsList">
+                <div class="loading">Loading builds...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // GitHub repository information
+        const GITHUB_OWNER = 'r7l-labs';
+        const GITHUB_REPO = 'interim-builds';
+        const GITHUB_BRANCH = 'main';
+        
+        // Try to detect build directories
+        async function loadBuilds() {
+            const buildsContainer = document.getElementById('buildsList');
+            const builds = [];
+            
+            // Try to load builds from GitHub API
+            try {
+                const response = await fetch(`https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/builds?ref=${GITHUB_BRANCH}`);
+                
+                if (response.ok) {
+                    const contents = await response.json();
+                    
+                    // Filter for directories with 5-digit names
+                    for (const item of contents) {
+                        if (item.type === 'dir' && /^\d{5}$/.test(item.name)) {
+                            builds.push({
+                                id: item.name,
+                                url: `builds/${item.name}/index.html`
+                            });
+                        }
+                    }
+                    
+                    // Sort by ID (newest first)
+                    builds.sort((a, b) => b.id.localeCompare(a.id));
+                    
+                    displayBuilds(builds);
+                } else {
+                    // Fallback: try sequential detection
+                    await detectBuildsSequentially(builds, buildsContainer);
+                }
+            } catch (error) {
+                console.error('Error loading from GitHub API:', error);
+                // Fallback: try sequential detection
+                await detectBuildsSequentially(builds, buildsContainer);
+            }
+        }
+        
+        // Fallback method: try loading builds sequentially
+        async function detectBuildsSequentially(builds, container) {
+            let foundBuilds = 0;
+            let consecutiveMissing = 0;
+            
+            // Check up to 100 possible builds
+            for (let i = 1; i <= 100 && consecutiveMissing < 5; i++) {
+                const buildId = String(i).padStart(5, '0');
+                const url = `builds/${buildId}/index.html`;
+                
+                try {
+                    const response = await fetch(url, { method: 'HEAD' });
+                    if (response.ok) {
+                        builds.push({ id: buildId, url: url });
+                        foundBuilds++;
+                        consecutiveMissing = 0;
+                    } else {
+                        consecutiveMissing++;
+                    }
+                } catch {
+                    consecutiveMissing++;
+                }
+            }
+            
+            // Sort by ID (newest first)
+            builds.sort((a, b) => b.id.localeCompare(a.id));
+            
+            displayBuilds(builds);
+        }
+        
+        function displayBuilds(builds) {
+            const container = document.getElementById('buildsList');
+            
+            if (builds.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <p>No builds found. Upload JAR files to builds/00001/ and they will appear here automatically.</p>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = builds.map(build => `
+                    <a href="${build.url}" class="directory-item">
+                        <div class="directory-name">Build #${build.id}</div>
+                        <div class="directory-files">View details →</div>
+                    </a>
+                `).join('');
+            }
+        }
+        
+        // Load builds on page load
+        loadBuilds();
+    </script>
+</body>
+</html>
