@@ -99,6 +99,63 @@
             padding: 3rem;
             color: #666;
         }
+        
+        .search-section {
+            margin-bottom: 1.5rem;
+        }
+        
+        .search-box {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            font-size: 1rem;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            transition: border-color 0.3s;
+        }
+        
+        .search-box:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+        
+        .page-btn {
+            padding: 0.5rem 1rem;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+            font-size: 0.9rem;
+        }
+        
+        .page-btn:hover:not(:disabled) {
+            background: #5568d3;
+        }
+        
+        .page-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .page-btn.active {
+            background: #764ba2;
+        }
+        
+        .page-info {
+            color: #666;
+            font-size: 0.9rem;
+            padding: 0.5rem 1rem;
+        }
     </style>
 </head>
 <body>
@@ -109,10 +166,21 @@
         </div>
         
         <div class="directories">
+            <div class="search-section">
+                <input 
+                    type="text" 
+                    id="searchBox" 
+                    class="search-box" 
+                    placeholder="🔍 Search builds by number..."
+                />
+            </div>
+            
             <h2>📁 Available Builds</h2>
             <div class="directory-grid" id="buildsList">
                 <div class="loading">Loading builds...</div>
             </div>
+            
+            <div class="pagination" id="pagination"></div>
         </div>
     </div>
     
@@ -122,10 +190,16 @@
         const GITHUB_REPO = 'interim-builds';
         const GITHUB_BRANCH = 'main';
         
+        // Pagination settings
+        const BUILDS_PER_PAGE = 12;
+        let allBuilds = [];
+        let filteredBuilds = [];
+        let currentPage = 1;
+        
         // Try to detect build directories
         async function loadBuilds() {
             const buildsContainer = document.getElementById('buildsList');
-            const builds = [];
+            allBuilds = [];
             
             // Try to load builds from GitHub API
             try {
@@ -137,7 +211,7 @@
                     // Filter for directories with 5-digit names
                     for (const item of contents) {
                         if (item.type === 'dir' && /^\d{5}$/.test(item.name)) {
-                            builds.push({
+                            allBuilds.push({
                                 id: item.name,
                                 url: `builds/${item.name}/index.html`
                             });
@@ -145,35 +219,34 @@
                     }
                     
                     // Sort by ID (newest first)
-                    builds.sort((a, b) => b.id.localeCompare(a.id));
+                    allBuilds.sort((a, b) => b.id.localeCompare(a.id));
                     
-                    displayBuilds(builds);
+                    filteredBuilds = [...allBuilds];
+                    displayPage(1);
                 } else {
                     // Fallback: try sequential detection
-                    await detectBuildsSequentially(builds, buildsContainer);
+                    await detectBuildsSequentially();
                 }
             } catch (error) {
                 console.error('Error loading from GitHub API:', error);
                 // Fallback: try sequential detection
-                await detectBuildsSequentially(builds, buildsContainer);
+                await detectBuildsSequentially();
             }
         }
         
         // Fallback method: try loading builds sequentially
-        async function detectBuildsSequentially(builds, container) {
-            let foundBuilds = 0;
+        async function detectBuildsSequentially() {
             let consecutiveMissing = 0;
             
-            // Check up to 100 possible builds
-            for (let i = 1; i <= 100 && consecutiveMissing < 5; i++) {
+            // Check up to 1000 possible builds, stop after 5 consecutive misses
+            for (let i = 1; i <= 1000 && consecutiveMissing < 5; i++) {
                 const buildId = String(i).padStart(5, '0');
                 const url = `builds/${buildId}/index.html`;
                 
                 try {
                     const response = await fetch(url, { method: 'HEAD' });
                     if (response.ok) {
-                        builds.push({ id: buildId, url: url });
-                        foundBuilds++;
+                        allBuilds.push({ id: buildId, url: url });
                         consecutiveMissing = 0;
                     } else {
                         consecutiveMissing++;
@@ -184,29 +257,116 @@
             }
             
             // Sort by ID (newest first)
-            builds.sort((a, b) => b.id.localeCompare(a.id));
+            allBuilds.sort((a, b) => b.id.localeCompare(a.id));
             
-            displayBuilds(builds);
+            filteredBuilds = [...allBuilds];
+            displayPage(1);
         }
         
-        function displayBuilds(builds) {
+        function displayPage(page) {
+            currentPage = page;
             const container = document.getElementById('buildsList');
+            const totalPages = Math.ceil(filteredBuilds.length / BUILDS_PER_PAGE);
             
-            if (builds.length === 0) {
+            if (filteredBuilds.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
-                        <p>No builds found. Upload JAR files to builds/00001/ and they will appear here automatically.</p>
+                        <p>No builds found. ${allBuilds.length > 0 ? 'Try a different search term.' : 'Upload JAR files to builds/00001/ and they will appear here automatically.'}</p>
                     </div>
                 `;
-            } else {
-                container.innerHTML = builds.map(build => `
-                    <a href="${build.url}" class="directory-item">
-                        <div class="directory-name">Build #${build.id}</div>
-                        <div class="directory-files">View details →</div>
-                    </a>
-                `).join('');
+                document.getElementById('pagination').innerHTML = '';
+                return;
             }
+            
+            // Calculate start and end indices
+            const startIndex = (page - 1) * BUILDS_PER_PAGE;
+            const endIndex = Math.min(startIndex + BUILDS_PER_PAGE, filteredBuilds.length);
+            const pageBuilds = filteredBuilds.slice(startIndex, endIndex);
+            
+            // Display builds for current page
+            container.innerHTML = pageBuilds.map(build => `
+                <a href="${build.url}" class="directory-item">
+                    <div class="directory-name">Build #${build.id}</div>
+                    <div class="directory-files">View details →</div>
+                </a>
+            `).join('');
+            
+            // Display pagination
+            displayPagination(page, totalPages);
         }
+        
+        function displayPagination(currentPage, totalPages) {
+            const pagination = document.getElementById('pagination');
+            
+            if (totalPages <= 1) {
+                pagination.innerHTML = '';
+                return;
+            }
+            
+            let html = '';
+            
+            // Previous button
+            html += `<button class="page-btn" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>← Prev</button>`;
+            
+            // Page numbers
+            const maxButtons = 7;
+            let startPage = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+            let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+            
+            if (endPage - startPage < maxButtons - 1) {
+                startPage = Math.max(1, endPage - maxButtons + 1);
+            }
+            
+            if (startPage > 1) {
+                html += `<button class="page-btn" onclick="goToPage(1)">1</button>`;
+                if (startPage > 2) {
+                    html += `<span class="page-info">...</span>`;
+                }
+            }
+            
+            for (let i = startPage; i <= endPage; i++) {
+                html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+            }
+            
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    html += `<span class="page-info">...</span>`;
+                }
+                html += `<button class="page-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+            }
+            
+            // Next button
+            html += `<button class="page-btn" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>Next →</button>`;
+            
+            // Page info
+            const startItem = (currentPage - 1) * BUILDS_PER_PAGE + 1;
+            const endItem = Math.min(currentPage * BUILDS_PER_PAGE, filteredBuilds.length);
+            html += `<span class="page-info">Showing ${startItem}-${endItem} of ${filteredBuilds.length}</span>`;
+            
+            pagination.innerHTML = html;
+        }
+        
+        function goToPage(page) {
+            const totalPages = Math.ceil(filteredBuilds.length / BUILDS_PER_PAGE);
+            if (page < 1 || page > totalPages) return;
+            displayPage(page);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        
+        // Search functionality
+        document.getElementById('searchBox').addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase().trim();
+            
+            if (searchTerm === '') {
+                filteredBuilds = [...allBuilds];
+            } else {
+                filteredBuilds = allBuilds.filter(build => 
+                    build.id.includes(searchTerm)
+                );
+            }
+            
+            displayPage(1);
+        });
         
         // Load builds on page load
         loadBuilds();
