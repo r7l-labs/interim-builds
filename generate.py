@@ -275,8 +275,13 @@ def generate_build_page(build_dir):
     build_path = build_dir['path']
     html_file = build_path / 'index.html'
     
-    # Get existing info if file exists
-    existing_info = read_existing_info(html_file)
+    # Skip if index.html already exists
+    if html_file.exists():
+        print(f"Skipped: {html_file} (already exists)")
+        return
+    
+    # Get default info for new pages
+    existing_info = "No information added yet. Edit this HTML file to add build notes, changelog, or other details."
     
     # Get JAR files
     jar_files = sorted(build_path.glob('*.jar'))
